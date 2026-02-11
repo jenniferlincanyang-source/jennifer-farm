@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JENNIFER Farm - LP 质押挖矿</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
+  <style>
+    body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; }
+    .card { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+    .btn-primary { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+    .btn-primary:hover { background: linear-gradient(90deg, #d97706, #dc2626); }
+    .glow { box-shadow: 0 0 20px rgba(245,158,11,0.3); }
+  </style>
+</head>
+<body class="text-white font-sans">
+  <div class="max-w-2xl mx-auto px-4 py-8">
+    <div class="text-center mb-8">
+      <h1 class="text-4xl font-bold mb-2">JENNIFER Farm</h1>
+      <p class="text-gray-400">质押 USDT/JENNIFER LP，挖取 JENNIFER</p>
+    </div>
+    <div class="text-right mb-4">
+      <button id="connectBtn" onclick="connectWallet()" class="btn-primary px-6 py-2 rounded-lg font-semibold">连接钱包</button>
+    </div>
+    <!-- Pool Info -->
+    <div class="card rounded-2xl p-6 mb-6 glow">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold">USDT / JENNIFER LP Pool</h2>
+        <span id="farmStatus" class="px-3 py-1 rounded-full text-sm bg-gray-700">未连接</span>
+      </div>
+      <div class="grid grid-cols-3 gap-4 text-center">
+        <div><p class="text-gray-400 text-sm">总质押量</p><p id="totalStaked" class="text-lg font-bold">--</p></div>
+        <div><p class="text-gray-400 text-sm">产出速率</p><p id="rewardRate" class="text-lg font-bold">--</p></div>
+        <div><p class="text-gray-400 text-sm">结束时间</p><p id="endTime" class="text-lg font-bold">--</p></div>
+      </div>
+    </div>
+    <!-- User -->
+    <div class="card rounded-2xl p-6 mb-6">
+      <h3 class="text-lg font-semibold mb-4">我的质押</h3>
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-white/5 rounded-xl p-4"><p class="text-gray-400 text-sm">已质押 LP</p><p id="userStaked" class="text-2xl font-bold mt-1">0.00</p></div>
+        <div class="bg-white/5 rounded-xl p-4"><p class="text-gray-400 text-sm">待领取 JENNIFER</p><p id="pendingReward" class="text-2xl font-bold mt-1 text-yellow-400">0.00</p></div>
+      </div>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">质押 LP 数量</label>
+        <div class="flex gap-2">
+          <div class="flex-1 relative">
+            <input id="depositAmount" type="number" placeholder="0.0" class="w-full bg-white/10 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-500">
+            <button onclick="setMaxDeposit()" class="absolute right-2 top-1/2 -translate-y-1/2 text-yellow-400 text-sm font-semibold">MAX</button>
+          </div>
+          <button onclick="doDeposit()" class="btn-primary px-6 py-3 rounded-lg font-semibold">质押</button>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">LP 余额: <span id="lpBalance">0.00</span></p>
+      </div>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">取回 LP 数量</label>
+        <div class="flex gap-2">
+          <div class="flex-1 relative">
+            <input id="withdrawAmount" type="number" placeholder="0.0" class="w-full bg-white/10 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-500">
+            <button onclick="setMaxWithdraw()" class="absolute right-2 top-1/2 -translate-y-1/2 text-yellow-400 text-sm font-semibold">MAX</button>
+          </div>
+          <button onclick="doWithdraw()" class="btn-primary px-6 py-3 rounded-lg font-semibold">取回</button>
+        </div>
+      </div>
+      <button onclick="doClaim()" class="w-full bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 font-semibold py-3 rounded-lg">领取 JENNIFER 奖励</button>
+    </div>
+    <div class="card rounded-2xl p-4 mb-6 text-center">
+      <p class="text-sm text-gray-400 mb-2">还没有 LP？先去 PancakeSwap 添加流动性</p>
+      <a id="addLiquidityLink" href="#" target="_blank" class="text-yellow-400 hover:text-yellow-300 font-semibold text-sm">前往 PancakeSwap 添加 USDT/JENNIFER 流动性 →</a>
+    </div>
+    <div class="text-center">
+      <button onclick="doEmergencyWithdraw()" class="text-red-400/60 hover:text-red-400 text-xs">紧急提取 (放弃奖励)</button>
+    </div>
+    <div id="toast" class="fixed bottom-4 right-4 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm hidden"></div>
+  </div>
+<!-- SCRIPT_PLACEHOLDER -->
+<script>
+const FARM_ADDRESS = "0x642511132b621C3e962C8681D9D46138B6b3EeAB";
+const JENNIFER = "0x4a0ad8f5083eb382bb4a4a334f1774955adce758";
+const USDT = "0x55d398326f99059fF775485246999027B3197955";
+const BSC_CHAIN_ID = "0x38";
+
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)",
+  "function decimals() view returns (uint8)"
+];
+const FARM_ABI = [
+  "function deposit(uint256)",
+  "function withdraw(uint256)",
+  "function claim()",
+  "function emergencyWithdraw()",
+  "function pendingReward(address) view returns (uint256)",
+  "function userInfo(address) view returns (uint256 amount, uint256 rewardDebt)",
+  "function totalStaked() view returns (uint256)",
+  "function rewardPerSecond() view returns (uint256)",
+  "function endTime() view returns (uint256)",
+  "function startTime() view returns (uint256)",
+  "function lpToken() view returns (address)"
+];
+
+let provider, signer, farmContract, lpContract, userAddress;
+let lpBalanceRaw = 0n, userStakedRaw = 0n;
+
+// PancakeSwap add liquidity link
+document.getElementById("addLiquidityLink").href =
+  `https://pancakeswap.finance/add/${USDT}/${JENNIFER}`;
+
+function showToast(msg, isError) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = `fixed bottom-4 right-4 bg-gray-800 border rounded-lg px-4 py-3 text-sm ${isError ? "border-red-500 text-red-400" : "border-green-500 text-green-400"}`;
+  setTimeout(() => t.classList.add("hidden"), 4000);
+}
+
+function fmt(val, dec = 18) {
+  return parseFloat(ethers.formatUnits(val, dec)).toFixed(4);
+}
+
+async function connectWallet() {
+  // 支持 OKX 钱包、MetaMask 等
+  const eth = window.okxwallet || window.ethereum;
+  if (!eth) { showToast("请安装 OKX 钱包或 MetaMask", true); return; }
+  try {
+    await eth.request({ method: "eth_requestAccounts" });
+    const chainId = await eth.request({ method: "eth_chainId" });
+    if (chainId !== BSC_CHAIN_ID) {
+      try {
+        await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: BSC_CHAIN_ID }] });
+      } catch (e) {
+        await eth.request({ method: "wallet_addEthereumChain", params: [{
+          chainId: BSC_CHAIN_ID, chainName: "BNB Smart Chain",
+          nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+          rpcUrls: ["https://bsc-dataseed1.binance.org"],
+          blockExplorerUrls: ["https://bscscan.com"]
+        }]});
+      }
+    }
+    provider = new ethers.BrowserProvider(eth);
+    signer = await provider.getSigner();
+    userAddress = await signer.getAddress();
+    document.getElementById("connectBtn").textContent = userAddress.slice(0,6) + "..." + userAddress.slice(-4);
+    document.getElementById("farmStatus").textContent = "已连接";
+    document.getElementById("farmStatus").className = "px-3 py-1 rounded-full text-sm bg-green-500/20 text-green-400";
+
+    farmContract = new ethers.Contract(FARM_ADDRESS, FARM_ABI, signer);
+    const lpAddr = await farmContract.lpToken();
+    lpContract = new ethers.Contract(lpAddr, ERC20_ABI, signer);
+    await refreshData();
+    setInterval(refreshData, 10000);
+
+    // 监听账户/链切换
+    eth.on("accountsChanged", () => location.reload());
+    eth.on("chainChanged", () => location.reload());
+  } catch (e) { showToast("连接失败: " + e.message, true); }
+}
+
+async function refreshData() {
+  try {
+    const [total, rps, end, info, pending, bal] = await Promise.all([
+      farmContract.totalStaked(),
+      farmContract.rewardPerSecond(),
+      farmContract.endTime(),
+      farmContract.userInfo(userAddress),
+      farmContract.pendingReward(userAddress),
+      lpContract.balanceOf(userAddress)
+    ]);
+    document.getElementById("totalStaked").textContent = fmt(total) + " LP";
+    document.getElementById("rewardRate").textContent = fmt(rps) + "/s";
+    const endDate = new Date(Number(end) * 1000);
+    document.getElementById("endTime").textContent = end > 0n ? endDate.toLocaleDateString("zh-CN") : "未启动";
+    userStakedRaw = info[0];
+    document.getElementById("userStaked").textContent = fmt(info[0]);
+    document.getElementById("pendingReward").textContent = fmt(pending);
+    lpBalanceRaw = bal;
+    document.getElementById("lpBalance").textContent = fmt(bal);
+  } catch (e) { console.error("refresh error:", e); }
+}
+
+function setMaxDeposit() { document.getElementById("depositAmount").value = ethers.formatUnits(lpBalanceRaw, 18); }
+function setMaxWithdraw() { document.getElementById("withdrawAmount").value = ethers.formatUnits(userStakedRaw, 18); }
+
+async function doDeposit() {
+  try {
+    const amt = ethers.parseUnits(document.getElementById("depositAmount").value, 18);
+    const allowance = await lpContract.allowance(userAddress, FARM_ADDRESS);
+    if (allowance < amt) {
+      showToast("授权 LP 中...", false);
+      const tx = await lpContract.approve(FARM_ADDRESS, ethers.MaxUint256);
+      await tx.wait();
+    }
+    showToast("质押中...", false);
+    const tx = await farmContract.deposit(amt);
+    await tx.wait();
+    showToast("质押成功!", false);
+    await refreshData();
+  } catch (e) { showToast("质押失败: " + (e.reason || e.message), true); }
+}
+
+async function doWithdraw() {
+  try {
+    const amt = ethers.parseUnits(document.getElementById("withdrawAmount").value, 18);
+    showToast("取回中...", false);
+    const tx = await farmContract.withdraw(amt);
+    await tx.wait();
+    showToast("取回成功!", false);
+    await refreshData();
+  } catch (e) { showToast("取回失败: " + (e.reason || e.message), true); }
+}
+
+async function doClaim() {
+  try {
+    showToast("领取中...", false);
+    const tx = await farmContract.claim();
+    await tx.wait();
+    showToast("领取成功!", false);
+    await refreshData();
+  } catch (e) { showToast("领取失败: " + (e.reason || e.message), true); }
+}
+
+async function doEmergencyWithdraw() {
+  if (!confirm("确定紧急提取？将放弃所有未领取的奖励！")) return;
+  try {
+    const tx = await farmContract.emergencyWithdraw();
+    await tx.wait();
+    showToast("紧急提取完成", false);
+    await refreshData();
+  } catch (e) { showToast("失败: " + (e.reason || e.message), true); }
+}
+</script>
+
+</body>
+</html>
